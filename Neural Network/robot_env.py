@@ -42,7 +42,6 @@ Dependencies:
 import os
 import math
 import time
-import threading
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Optional
@@ -900,10 +899,10 @@ class VectorizedRobotEnv:
     All PyBullet calls therefore happen on the main thread, one env at a time.
     This is slower than true parallelism but completely stable on Windows.
 
-    For the 185H the recommended num_envs is 4-8 for stable performance.
+    For the 7970X Threadripper the recommended num_envs is 16-32 for stable performance.
 
     Args:
-        num_envs   : number of environments (recommend 4-8 on Windows)
+        num_envs   : number of environments (recommend 16-32 on Windows)
         render_idx : index of env to show in GUI (-1 = none)
         seed       : base random seed (each env gets seed + i)
     """
