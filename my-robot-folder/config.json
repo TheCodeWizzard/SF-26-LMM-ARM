@@ -1,0 +1,8 @@
+{
+    "document_id": "50b414df8c476e601f29258d",
+    "workspace_id": "fda50347de557cd3e33bdae2",
+    "assembly_id": "7b8b8ad4f9f8e0fe87e686dc",
+    "robot_name": "my_robot",
+    "output_format": "urdf",
+    "assemblyName": "Main Assembly"
+}
