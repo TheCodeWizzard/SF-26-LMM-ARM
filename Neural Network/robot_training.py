@@ -4,13 +4,12 @@ robot_training.py — PPO Training Loop
 Trains the RobotActorCritic network on the RobotEnv simulation using
 Proximal Policy Optimization (PPO) with Generalized Advantage Estimation (GAE).
 
-Designed for: Intel Core Ultra 9 185H + NVIDIA RTX 4070 Laptop GPU
-    • 16 parallel PyBullet environments (12 on P-cores, 4 on E-cores)
+Designed for: AMD Threadripper 7970X + NVIDIA RTX 5090
+    • 32 parallel PyBullet environments (sequential on Windows, thread-safe)
     • Network forward/backward passes run entirely on CUDA
     • CPU ↔ GPU transfers are batched and minimised
-    • P-core affinity is set automatically on Windows
 
-Expected training timeline (plugged in, max performance mode):
+Expected training timeline (max performance mode):
     ~200K steps  :  Arm begins pointing toward objects        (~3 min)
     ~800K steps  :  Consistent reaching                       (~11 min)
     ~2M   steps  :  First successful grasps                   (~28 min)
@@ -28,7 +27,7 @@ Usage:
     py robot_training.py --resume runs/my_run     # resume from checkpoint
     py robot_training.py --render                 # render one env during training
     py robot_training.py --steps 10_000_000       # custom total steps
-    py robot_training.py --envs 8                 # fewer parallel envs
+    py robot_training.py --envs 16                # fewer parallel envs
 
 Dependencies:
     pip install pybullet torch numpy tensorboard
@@ -40,7 +39,6 @@ import csv
 import math
 import time
 import argparse
-import threading
 import datetime
 from pathlib import Path
 from collections import deque
@@ -65,22 +63,22 @@ from robot_env import VectorizedRobotEnv, RobotEnv, MAX_STEPS
 class Config:
     """
     All training hyperparameters in one place.
-    Tuned for the 185H + RTX 4070 hardware configuration.
+    Tuned for the 7970X Threadripper + RTX 5090 hardware configuration.
     """
 
     # ── Environment ───────────────────────────────────────────────────────────
-    num_envs:           int   = 4        # parallel environments (sequential on Windows)
+    num_envs:           int   = 32       # parallel environments (sequential on Windows)
     #   PyBullet on Windows is not thread-safe; sequential stepping is used
-    #   4 envs is the recommended default for stable Windows training
+    #   32 envs is the recommended default for the 7970X Threadripper
 
     # ── Rollout ───────────────────────────────────────────────────────────────
     steps_per_env:      int   = 512      # steps collected per env per update
-    #   Total batch = num_envs × steps_per_env = 4 × 512 = 2,048 steps
+    #   Total batch = num_envs × steps_per_env = 32 × 512 = 16,384 steps
 
     # ── PPO update ────────────────────────────────────────────────────────────
     ppo_epochs:         int   = 10       # gradient epochs per collected batch
     minibatch_size:     int   = 256      # samples per gradient step
-    #   Minibatches per epoch = 8192 / 256 = 32
+    #   Minibatches per epoch = 16384 / 256 = 64
 
     clip_coef:          float = 0.2      # PPO clip ε
     value_coef:         float = 0.5      # critic loss weight
@@ -243,39 +241,6 @@ class RolloutBuffer:
 
     def reset(self):
         self.ptr = 0
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  P-CORE AFFINITY  (185H optimisation)
-# ─────────────────────────────────────────────────────────────────────────────
-
-def set_pcore_affinity():
-    """
-    Pin the current process to P-cores only on the Intel Core Ultra 9 185H.
-    185H P-core logical processors: 0–11 (6 P-cores × 2 threads each).
-    E-cores: 12–19. LP E-cores: 20–21.
-
-    This prevents the OS from scheduling PyBullet worker threads onto
-    the slower E-cores, improving simulation throughput by ~15–25%.
-
-    Only applies on Windows. Silently skips on other platforms.
-    """
-    if sys.platform != "win32":
-        return
-    try:
-        import ctypes
-        # Affinity mask for logical processors 0–11 (P-cores)
-        # Binary: 0b111111111111 = 0xFFF = 4095
-        p_core_mask = 0xFFF
-        kernel32 = ctypes.windll.kernel32
-        handle   = kernel32.GetCurrentProcess()
-        result   = kernel32.SetProcessAffinityMask(handle, p_core_mask)
-        if result:
-            print("  [CPU] Process pinned to P-cores (logical 0–11)")
-        else:
-            print("  [CPU] Affinity unchanged (may need admin rights)")
-    except Exception as e:
-        print(f"  [CPU] Could not set affinity: {e}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -797,8 +762,8 @@ def parse_args() -> argparse.Namespace:
                    help="Render one environment during training")
     p.add_argument("--steps",   type=int,  default=10_000_000,
                    help="Total environment steps (default: 10M)")
-    p.add_argument("--envs",    type=int,  default=4,
-                   help="Number of parallel environments (default: 16)")
+    p.add_argument("--envs",    type=int,  default=32,
+                   help="Number of parallel environments (default: 32)")
     p.add_argument("--lr",      type=float, default=3e-4,
                    help="Learning rate (default: 3e-4)")
     p.add_argument("--name",    type=str,  default="",
@@ -816,9 +781,6 @@ if __name__ == "__main__":
     if args.infer:
         run_inference(args.infer, render=True)
         sys.exit(0)
-
-    # ── Set P-core affinity (185H optimisation) ───────────────────────────────
-    set_pcore_affinity()
 
     # ── Build config ──────────────────────────────────────────────────────────
     cfg              = Config()
